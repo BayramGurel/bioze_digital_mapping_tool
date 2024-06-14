@@ -137,27 +137,78 @@ def update_layer(selected_variables, all_arrays, d_to_farm):
 
 # Filter potential digester locations
 def get_sites(fuzzy_df, w, g, idx):
-    if 'fuzzy' in fuzzy_df.columns:
-        # fuzzy_df = fuzzy_df.set_index('hex9').reindex(idx.index)
-        fuzzy_df = fuzzy_df.drop_duplicates(subset='hex9').set_index('hex9').reindex(idx.index)
-        # st.write(fuzzy_df)
-        lisa = esda.Moran_Local(fuzzy_df['fuzzy'], w, seed=42)
-        # HH = fuzzy_df[(lisa.q == 1) & (lisa.p_sim < 0.01)].index.to_list()
-        HH = fuzzy_df[(lisa.p_sim < 0.05)].index.to_list()
-        H = g.subgraph(HH)
-        subH = list(nx.connected_components(H))
-        # filter_subH = [component for component in subH if len(component) > 10]
-        filter_subH = [component for component in subH if len(component) > 5]
-        site_idx = []
-        for component in filter_subH:
-            subgraph = H.subgraph(component)
-            eigenvector_centrality = nx.eigenvector_centrality(subgraph, max_iter=1500)
-            max_node_index = max(eigenvector_centrality, key=eigenvector_centrality.get)
-            site_idx.append(max_node_index)
-        st.session_state.all_loi = fuzzy_df.loc[site_idx].reset_index()
-        st.write(st.session_state.all_loi)
-    else:
+    # Check if 'fuzzy' column exists in the DataFrame
+    if 'fuzzy' not in fuzzy_df.columns:
+        st.error("The DataFrame does not contain a 'fuzzy' column.")
         return None
+
+    # Drop duplicates based on 'hex9' and set it as index
+    fuzzy_df = fuzzy_df.drop_duplicates(subset='hex9').set_index('hex9')
+    st.text(fuzzy_df)
+
+    # Convert 'geometry' to WKT format if it exists
+    if 'geometry' in fuzzy_df.columns:
+        fuzzy_df['geometry'] = fuzzy_df['geometry'].apply(lambda geom: geom.wkt)
+    st.text(fuzzy_df)
+
+    # Check if idx is a DataFrame and has 'hex9' as index
+    if not isinstance(idx, pd.DataFrame) or idx.index.name != 'hex9':
+        st.error("The idx should be a pandas DataFrame with 'hex9' as index.")
+        return None
+
+    # Drop duplicates from idx.index before reindexing
+    unique_idx = idx.index.drop_duplicates()
+    st.text(unique_idx)
+
+    # Merge fuzzy_df with idx keeping only the indices in both
+    fuzzy_df = fuzzy_df.reindex(unique_idx)
+    st.text(fuzzy_df)
+
+    # Convert 'geometry' to WKT format again if it exists
+    if 'geometry' in fuzzy_df.columns:
+        fuzzy_df['geometry'] = gpd.GeoSeries(fuzzy_df['geometry']).to_wkt()
+
+    # Compute local Moran's I
+    try:
+        lisa = esda.Moran_Local(fuzzy_df['fuzzy'], w, seed=42)
+    except ValueError as e:
+        st.error(f"Error computing Moran's I: {str(e)}")
+        return None
+
+    # Get significant locations
+    HH = fuzzy_df[lisa.p_sim < 0.01].index.to_list()
+
+    # Build subgraph with significant locations
+    H = g.subgraph(HH)
+
+    # Convert to undirected graph and get connected components
+    H_undirected = nx.Graph(H.to_undirected())
+    subH = [component for component in nx.connected_components(H_undirected) if len(component) > 1]
+
+    # Filter subH to only include components with more than 2 nodes
+    filter_subH = [component for component in subH if len(component) > 2]
+
+    # Calculate eigenvector centrality for each connected component
+    site_idx = []
+    for component in filter_subH:
+        # Create a subgraph for the current connected component
+        subgraph = H.subgraph(component)
+        # Calculate eigenvector centrality for a connected graph
+        eigenvector_centrality = nx.eigenvector_centrality(subgraph, max_iter=1500)
+        # Get the node index with the highest eigenvector centrality in that connected graph
+        max_node_index = max(eigenvector_centrality, key=eigenvector_centrality.get)
+        # Append the node index to a list
+        site_idx.append(max_node_index)
+
+    # Check if 'fuzzy' column exists in st.session_state.all_loi and has multiple elements
+    if 'fuzzy' in st.session_state.all_loi.columns and not st.session_state.all_loi['fuzzy'].empty:
+        fig = ff.create_distplot([st.session_state.all_loi['fuzzy'].tolist()], ['Distribution'], show_hist=False, bin_size=0.02)
+    else:
+        st.write("Not enough data to create a distribution plot.")
+
+    return None
+
+
 
 #####
 
@@ -255,8 +306,7 @@ def initialize_session_state(idx):
         st.session_state.w = weights.Queen.from_dataframe(idx, use_index=True)
         # st.write(st.session_state.w)
     if 'g' not in st.session_state:
-        st.session_state.g = nx.read_graphml('./app_data/g.graphml')
-        # st.write(st.session_state.g)
+        st.session_state.g = nx.read_graphml('./osm_network/G.graphml')
 
 
 ### STAP 2
@@ -316,7 +366,7 @@ def perform_suitability_analysis():
 
     if st.sidebar.button(':two: Resultaat Opslaan & Ga naar Fase 2', help="Klik om de huidige gefilterde locaties op te slaan voor verder onderzoek in ***Fase 2: Beleid Verkenner***."):
         st.session_state.loi = st.session_state.all_loi
-        st.switch_page("pages/2_Phase_2_Policy_Explorer.py")
+        st.switch_page("pages/2_Fase_2_Beleidsverkenner.py")
 
     hex_df = update_layer(selected_variables, all_arrays, d_to_farm)
     layers = get_layers(hex_df)
@@ -344,5 +394,5 @@ def perform_suitability_analysis():
 
 # Run the Streamlit app
 if __name__ == "__main__":
-    idx = load_gdf('./app_data/h3_pzh_polygons.shp')
+    idx = load_gdf('./app_data/h3_polygons.shp')
     main(idx)
