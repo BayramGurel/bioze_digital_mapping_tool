@@ -136,77 +136,97 @@ def update_layer(selected_variables, all_arrays, d_to_farm):
     return hex_df
 
 # Filter potential digester locations
-def get_sites(fuzzy_df, w, g, idx):
-    # Check if 'fuzzy' column exists in the DataFrame
-    if 'fuzzy' not in fuzzy_df.columns:
-        st.error("The DataFrame does not contain a 'fuzzy' column.")
-        return None
+def get_sites(df, w, g, idx,
+              score_column='fuzzy', seed=42) -> pd.DataFrame:
+    """
+    Analyzes potential digester locations based on suitability scores and spatial factors.
 
-    # Drop duplicates based on 'hex9' and set it as index
-    fuzzy_df = fuzzy_df.drop_duplicates(subset='hex9').set_index('hex9')
-    st.text(fuzzy_df)
+    Args:
+        df (pd.DataFrame): DataFrame containing a column with suitability scores.
+        w (pysal.W): Spatial weights object for spatial analysis.
+        g (networkx.Graph): Graph object for network analysis.
+        idx (pd.DataFrame): DataFrame with potential digester locations (indexed by "hex9").
+        score_column (str, optional): Name of the column containing suitability scores. Defaults to 'fuzzy'.
+        seed (int, optional): Seed for random number generator. Defaults to 42.
 
-    # Convert 'geometry' to WKT format if it exists
-    if 'geometry' in fuzzy_df.columns:
-        fuzzy_df['geometry'] = fuzzy_df['geometry'].apply(lambda geom: geom.wkt)
-    st.text(fuzzy_df)
+    Returns:
+        pd.DataFrame: DataFrame containing the most central locations within significant suitability clusters.
 
-    # Check if idx is a DataFrame and has 'hex9' as index
+    Raises:
+        ValueError: If errors occur during data validation, spatial analysis, or no overlapping "hex9" values are found.
+    """
+
+    # Input Validation
+    if score_column not in df.columns:
+        raise ValueError(f"The DataFrame does not contain a '{score_column}' column.")
     if not isinstance(idx, pd.DataFrame) or idx.index.name != 'hex9':
-        st.error("The idx should be a pandas DataFrame with 'hex9' as index.")
-        return None
+        raise ValueError("The idx should be a pandas DataFrame with 'hex9' as index.")
 
-    # Drop duplicates from idx.index before reindexing
-    unique_idx = idx.index.drop_duplicates()
-    st.text(unique_idx)
+    # Data Cleaning and Preprocessing (Improved handling of missing values)
+    df.dropna(subset=[score_column], inplace=True)  # Handle missing values
+    df = df.drop_duplicates(subset='hex9').set_index('hex9')
 
-    # Merge fuzzy_df with idx keeping only the indices in both
-    fuzzy_df = fuzzy_df.reindex(unique_idx)
-    st.text(fuzzy_df)
+    # Informative logging
+    st.write("Dataframe after dropping duplicates and setting index:")
+    st.write(df.index)
+    st.write(df.head())
 
-    # Convert 'geometry' to WKT format again if it exists
-    if 'geometry' in fuzzy_df.columns:
-        fuzzy_df['geometry'] = gpd.GeoSeries(fuzzy_df['geometry']).to_wkt()
+    # Ensure all "hex9" values from df are present in the index
+    unique_idx = df.index.intersection(idx.index)
 
-    # Compute local Moran's I
+    # Informative logging
+    st.write("Index of idx dataframe:")
+    st.write(idx.index)
+    st.write("Head of idx dataframe:")
+    st.write(idx.head())
+
+    if unique_idx.empty:
+        raise ValueError("No overlapping 'hex9' values found between df and idx. Check data quality and 'hex9' formatting.")
+
+    df = df.loc[unique_idx]  # Reindex df based on the intersection
+
+    # Informative logging
+    st.write("Dataframe after reindexing with unique_idx:")
+    st.write(df.head())  # Print to console for debugging
+
+    if 'geometry' in df.columns:
+        df['geometry'] = gpd.GeoSeries(df['geometry']).to_shapely()
+
+    # Spatial Analysis with Error Handling (using a try-except block)
     try:
-        lisa = esda.Moran_Local(fuzzy_df['fuzzy'], w, seed=42)
+        lisa = esda.Moran_Local(df[score_column], w, seed=seed)
     except ValueError as e:
-        st.error(f"Error computing Moran's I: {str(e)}")
-        return None
+        raise ValueError(f"Error computing Moran's I: {str(e)}") from e  # Propagate original error
 
-    # Get significant locations
-    HH = fuzzy_df[lisa.p_sim < 0.01].index.to_list()
+    # Identify Significant Locations
+    significant_locations = df[lisa.p_sim < 0.01].index.to_list()
 
-    # Build subgraph with significant locations
-    H = g.subgraph(HH)
-
-    # Convert to undirected graph and get connected components
+    # Network Analysis
+    H = g.subgraph(significant_locations)
     H_undirected = nx.Graph(H.to_undirected())
-    subH = [component for component in nx.connected_components(H_undirected) if len(component) > 1]
 
-    # Filter subH to only include components with more than 2 nodes
-    filter_subH = [component for component in subH if len(component) > 2]
+    connected_components = [component for component in nx.connected_components(H_undirected) if len(component) > 1]
+    filtered_components = [component for component in connected_components if len(component) > 2]
 
-    # Calculate eigenvector centrality for each connected component
-    site_idx = []
-    for component in filter_subH:
-        # Create a subgraph for the current connected component
+    # Calculate Eigenvector Centrality for Each Component
+    centrality_measure = nx.eigenvector_centrality  # Example: using eigenvector centrality
+    central_locations = []
+    for component in filtered_components:
         subgraph = H.subgraph(component)
-        # Calculate eigenvector centrality for a connected graph
-        eigenvector_centrality = nx.eigenvector_centrality(subgraph, max_iter=1500)
-        # Get the node index with the highest eigenvector centrality in that connected graph
-        max_node_index = max(eigenvector_centrality, key=eigenvector_centrality.get)
-        # Append the node index to a list
-        site_idx.append(max_node_index)
+        centrality = centrality_measure(subgraph, max_iter=1500)
+        most_central_node = max(centrality, key=centrality.get)
+        central_locations.append(most_central_node)
 
-    # Check if 'fuzzy' column exists in st.session_state.all_loi and has multiple elements
-    if 'fuzzy' in st.session_state.all_loi.columns and not st.session_state.all_loi['fuzzy'].empty:
-        fig = ff.create_distplot([st.session_state.all_loi['fuzzy'].tolist()], ['Distribution'], show_hist=False, bin_size=0.02)
+    # Check if 'fuzzy' exists in st.session_state.all_loi
+    if 'fuzzy' in st.session_state.all_loi.columns:
+        if not st.session_state.all_loi['fuzzy'].empty:
+            st.session_state.all_loi = df.loc[central_locations].reset_index()
+        else:
+            st.write("st.session_state.all_loi['fuzzy'] is empty.")
     else:
-        st.write("Not enough data to create a distribution plot.")
+        st.write("'fuzzy' does not exist in st.session_state.all_loi.")
 
-    return None
+
 
 
 
@@ -341,6 +361,9 @@ def plot_variable(column, title, data, help_text):
 
 ### STAP 4
 def perform_suitability_analysis():
+    """
+        Performs suitability analysis based on selected criteria and visualizes results.
+    """
     with st.sidebar.form("suitability_analysis_form"):
         selected_variables = st.multiselect(":one: Selecteer Criteria", list(all_arrays.keys()))
         submit_button = st.form_submit_button("Bouw Geschiktheidskaart")
@@ -351,13 +374,16 @@ def perform_suitability_analysis():
 
     if submit_button:
         hex_df = update_layer(selected_variables, all_arrays, d_to_farm)
-        get_sites(hex_df, st.session_state.w, st.session_state.g, idx)
-        if not st.session_state.all_loi['fuzzy'].empty:
-            fig = ff.create_distplot([st.session_state.all_loi['fuzzy'].tolist()], ['Distribution'], show_hist=False, bin_size=0.02)
+
+        # Improved data handling in get_sites
+        all_loi = get_sites(hex_df, st.session_state.w, st.session_state.g, idx)
+        if not all_loi.empty:
+            st.session_state.all_loi = all_loi
+            fig = ff.create_distplot([all_loi['fuzzy'].tolist()], ['Distribution'], show_hist=False, bin_size=0.02)
             fig.update_layout(autosize=True, width=600, height=400)
             st.session_state.fig = fig
         else:
-            st.write("st.session_state.all_loi['fuzzy'] is empty.")
+            st.write("No suitable locations identified based on selected criteria.")
 
     st.markdown("### **Geschiktheidskaart**")
     col1, col2, col3 = st.columns(3)
