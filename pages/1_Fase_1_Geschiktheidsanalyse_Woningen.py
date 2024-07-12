@@ -25,14 +25,21 @@ PADDING = 0
 COLORMAP = 'magma'
 VIEW_STATE = pdk.ViewState(longitude=4.390, latitude=51.891, zoom=8, bearing=0, pitch=0)
 DATA_PATHS = {
-    'farm': './hex/aantal_eenpersoonshoudens.csv',
-    # 'farm': './standalone/cbs_2022_h3.csv',
-    'road': './hex/aantal_huurwoningen_in_bezit_woningcorporaties.csv',
-    'industry': './hex/aantal_inwoners.csv',
-    'nature': './hex/aantal_meergezins_woningen.csv',
-    'water': './hex/aantal_niet_bewoonde_woningen.csv',
-    'urban': './hex/aantal_woningen_bouwjaar_voor_1945.csv',
-    'inlet': './hex/aantal_woningen.csv',
+    # 'farm': './hex/aantal_eenpersoonshoudens.csv',
+    # 'road': './hex/aantal_huurwoningen_in_bezit_woningcorporaties.csv',
+    # 'industry': './hex/aantal_inwoners.csv',
+    # 'nature': './hex/aantal_meergezins_woningen.csv',
+    # 'water': './hex/aantal_niet_bewoonde_woningen.csv',
+    # 'urban': './hex/aantal_woningen_bouwjaar_voor_1945.csv',
+    # 'inlet': './hex/aantal_woningen.csv',
+
+    'farm': './standalone/outputs/aantal_eenpersoonshuishoudens_h3.csv',
+    'road': './standalone/outputs/aantal_huurwoningen_in_bezit_woningcorporaties_h3.csv',
+    'industry': './standalone/outputs/aantal_inwoners_h3.csv',
+    'nature': './standalone/outputs/aantal_meergezins_woningen_h3.csv',
+    'water': './standalone/outputs/aantal_niet_bewoonde_woningen_h3.csv',
+    'urban': './standalone/outputs/aantal_woningen_bouwjaar_voor_1945_h3.csv',
+    'inlet': './standalone/outputs/aantal_woningen_h3.csv',
 }
 
 # Generating colormap
