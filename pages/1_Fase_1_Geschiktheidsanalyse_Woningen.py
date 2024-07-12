@@ -407,7 +407,7 @@ def initialize_session_state(idx):
 def display_intro_text():
     st.markdown("### Fase 1: Geschiktheidsanalyse - Potentiele locaties voor nieuwbouw projecten")
     st.markdown(
-        "Bekijk de onderstaande kaarten, elk vertegenwoordigt een vooraf geselecteerd criterium dat essentieel wordt geacht voor het bepalen van de geschiktheid van een gebied voor grootschalige vergisters.  "
+        "Bekijk de onderstaande kaarten, elk vertegenwoordigt een vooraf geselecteerd criterium dat essentieel wordt geacht voor het bepalen van de geschiktheid van een gebied voor nieuwbouw projecten.  "
         " Elk gebied in de regio krijgt een geschiktheidsscore tussen 0 en 1, waarbij 0 het minst geschikt en 1 het meest geschikt vertegenwoordigt.  "
         "<br>Tip: Klik op het vraagtekenpictogram :grey_question: boven elke kaart voor meer informatie.",
         unsafe_allow_html=True
@@ -462,7 +462,7 @@ def perform_suitability_analysis():
     st.markdown("### **Geschiktheidskaart**")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown(f"**Aantal Potentiële Locaties: {len(st.session_state['all_loi'])}**")
+        st.markdown(f"**Aantal Potentiële Locaties voor nieuwbouw projecten: {len(st.session_state['all_loi'])}**")
 
     if st.sidebar.button(':two: Resultaat Opslaan & Ga naar Fase 2', help="Klik om de huidige gefilterde locaties op te slaan voor verder onderzoek in ***Fase 2: Beleid Verkenner***."):
         st.session_state.loi = st.session_state.all_loi
