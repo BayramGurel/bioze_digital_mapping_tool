@@ -405,7 +405,7 @@ def initialize_session_state(idx):
 
 ### STAP 2
 def display_intro_text():
-    st.markdown("### Fase 1: Geschiktheidsanalyse - Potentiële Locaties voor Grootschalige Vergisters")
+    st.markdown("### Fase 1: Geschiktheidsanalyse - Potentiele locaties voor nieuwbouw projecten")
     st.markdown(
         "Bekijk de onderstaande kaarten, elk vertegenwoordigt een vooraf geselecteerd criterium dat essentieel wordt geacht voor het bepalen van de geschiktheid van een gebied voor grootschalige vergisters.  "
         " Elk gebied in de regio krijgt een geschiktheidsscore tussen 0 en 1, waarbij 0 het minst geschikt en 1 het meest geschikt vertegenwoordigt.  "
