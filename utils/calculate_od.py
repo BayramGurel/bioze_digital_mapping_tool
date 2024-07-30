@@ -52,7 +52,11 @@ def find_closest_osmid(gdf, n):
     # Use the indices to map to the corresponding osmid
     gdf['closest_osmid'] = n.iloc[indices.flatten()]['osmid_original'].values
 
+    # Ensure each point is associated with a single closest node
+    gdf['closest_osmid'] = gdf['closest_osmid'].apply(lambda x: x[0] if isinstance(x, list) else x)
+
     print(gdf)
+
 
 def calculate_od_matrix(farm_gdf, loi_gdf, cost_per_km=0.69, frequency_per_day=1, lifetime_in_days=1):
     """
@@ -74,8 +78,15 @@ def calculate_od_matrix(farm_gdf, loi_gdf, cost_per_km=0.69, frequency_per_day=1
     # Calculate shortest path between all pair orig (farm) and dest (set of candidate digester sites)
     for origin in orig:
         if origin in g.nodes:
-            od_matrix[origin] = {destination: nx.shortest_path_length(g, origin, destination, weight='length') / 1000 
-                                 for destination in dest if destination in g.nodes}
+            od_matrix[origin] = {}
+            for destination in dest:
+                if destination in g.nodes:
+                    try:
+                        od_matrix[origin][destination] = nx.shortest_path_length(g, origin, destination, weight='length') / 1000 
+                    except nx.NetworkXNoPath:
+                        print(f"No path found between origin node {origin} and destination node {destination}.")
+                else:
+                    print(f"Destination node {destination} is not in the graph.")
         else:
             print(f"Origin node {origin} is not in the graph.")
 
