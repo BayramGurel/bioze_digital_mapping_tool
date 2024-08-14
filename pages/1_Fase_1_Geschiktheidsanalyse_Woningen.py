@@ -16,7 +16,7 @@ from pysal.lib import weights
 from libpysal.weights import w_subset
 
 # Importing local application/library specific imports
-from utils.cflp_function import *
+from Scripts.utils.cflp_function import *
 
 #####
 
@@ -33,13 +33,13 @@ DATA_PATHS = {
     # 'urban': './hex/aantal_woningen_bouwjaar_voor_1945.csv',
     # 'inlet': './hex/aantal_woningen.csv',
 
-    'farm': './standalone/outputs/aantal_eenpersoonshuishoudens_h3.csv',
-    'road': './standalone/outputs/aantal_huurwoningen_in_bezit_woningcorporaties_h3.csv',
-    'industry': './standalone/outputs/aantal_inwoners_h3.csv',
-    'nature': './standalone/outputs/aantal_meergezins_woningen_h3.csv',
-    'water': './standalone/outputs/aantal_niet_bewoonde_woningen_h3.csv',
-    'urban': './standalone/outputs/aantal_woningen_bouwjaar_voor_1945_h3.csv',
-    'inlet': './standalone/outputs/aantal_woningen_h3.csv',
+    'farm': './standalone/CBS_100-100_house/outputs/aantal_eenpersoonshuishoudens_h3.csv',
+    'road': './standalone/CBS_100-100_house/outputs/aantal_huurwoningen_in_bezit_woningcorporaties_h3.csv',
+    'industry': './standalone/CBS_100-100_house/outputs/aantal_inwoners_h3.csv',
+    'nature': './standalone/CBS_100-100_house/outputs/aantal_meergezins_woningen_h3.csv',
+    'water': './standalone/CBS_100-100_house/outputs/aantal_niet_bewoonde_woningen_h3.csv',
+    'urban': './standalone/CBS_100-100_house/outputs/aantal_woningen_bouwjaar_voor_1945_h3.csv',
+    'inlet': './standalone/CBS_100-100_house/outputs/aantal_woningen_h3.csv',
 }
 
 # Generating colormap
@@ -400,7 +400,7 @@ def initialize_session_state(idx):
         st.session_state.w = weights.Queen.from_dataframe(idx, use_index=True)
         # st.write(st.session_state.w)
     if 'g' not in st.session_state:
-        st.session_state.g = nx.read_graphml('./osm_network/G.graphml')
+        st.session_state.g = nx.read_graphml('./osm_network/extracts/G.graphml')
 
 
 ### STAP 2
