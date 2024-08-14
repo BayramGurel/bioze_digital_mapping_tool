@@ -16,7 +16,7 @@ from pysal.lib import weights
 from libpysal.weights import w_subset
 
 # Importing local application/library specific imports
-from utils.cflp_function import *
+from Scripts.utils.cflp_function import *
 
 #####
 
@@ -392,7 +392,7 @@ def initialize_session_state(idx):
         st.session_state.w = weights.Queen.from_dataframe(idx, use_index=True)
         # st.write(st.session_state.w)
     if 'g' not in st.session_state:
-        st.session_state.g = nx.read_graphml('./osm_network/G.graphml')
+        st.session_state.g = nx.read_graphml('./osm_network/extracts/G.graphml')
 
 
 ### STAP 2

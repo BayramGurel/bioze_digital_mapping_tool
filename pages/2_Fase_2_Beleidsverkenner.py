@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import pydeck as pdk
-from utils.cflp_function import *
-from utils.calculate_od import *
+from Scripts.utils.cflp_function import *
+from Scripts.utils.calculate_od import *
 from datetime import date
 from pydeck.types import String
 import plotly.express as px
