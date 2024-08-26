@@ -58,12 +58,12 @@ def find_closest_osmid(gdf, n):
     print(gdf)
 
 
-def calculate_od_matrix(farm_gdf, loi_gdf, cost_per_km=0.69, frequency_per_day=1, lifetime_in_days=1):
+def calculate_od_matrix(farm_gdf, loi_gdf, cost_per_km, frequency_per_day=1, lifetime_in_days=1):
     """
     Finds the nearest road network node for each candidate site and calculates the cost matrix.
     """
     # Load the graph
-    g = ox.load_graphml('./osm_network/G.graphml') 
+    g = ox.load_graphml('../../osm_network/extracts/G.graphml') 
 
     # Get unique origin and destination nodes
     orig = farm_gdf['closest_os'].unique().tolist()
