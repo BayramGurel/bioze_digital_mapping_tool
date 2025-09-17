@@ -2,7 +2,7 @@
 
 # BIOZE Interactive Decision Support Tool
 Authors: Wen-Yu Chen [![Linkedin](https://i.stack.imgur.com/gVE0j.png)](https://www.linkedin.com/in/wenyuchen-tw-nl/), Johannes Flacke [![Linkedin](https://i.stack.imgur.com/gVE0j.png)](https://www.linkedin.com/in/johannes-flacke-38463340/), Pirouz Nourian [![Linkedin](https://i.stack.imgur.com/gVE0j.png)](https://www.linkedin.com/in/pirouz-nourian-71b10427/)  
-Provincie Zuid-Holland: Bayram [![Linkedin]([https://i.stack.imgur.com/gVE0j.png)](https://www.linkedin.com/in/pirouz-nourian-71b10427/](https://www.linkedin.com/in/bayram-gurel/))  
+Provincie Zuid-Holland: Bayram [![Linkedin](www.linkedin.com/in/bayram-gurel)  
 
 The tool is developed for the EU Interreg Project: BIOmass skills for Net Zero ([BIOZE](https://www.interregnorthsea.eu/bioze)), on behalf of the Faculty of Geo-Information Science and Earth Observation ([ITC](https://www.itc.nl/)) at the University of Twente.  
 
