@@ -1,293 +1,199 @@
-import streamlit as st
+import json
+from dataclasses import asdict
+
 import pandas as pd
-import geopandas as gpd
-import pydeck as pdk
-from Scripts.utils.cflp_function import *
-from Scripts.utils.calculate_od import *
-from datetime import date
-from pydeck.types import String
 import plotly.express as px
-import random
+import streamlit as st
 
-# Constants
-TODAY = date.today()
-FOLDER_PATH = 'app_data'
+from bioze.data import load_farms, read_supply_csv
+from bioze.optimization import Scenario, solve_scenario
+from bioze.routing import calculate_distances, distance_table
+from bioze.ui import footer, header, note, setup, show_map
 
-# Page configurations
-st.set_page_config(page_title="BIOZE Tool - Policy Exploration (Saved Sites)", layout="wide")
-
-class DataLoader:
-    def __init__(self, folder_path):
-        self.folder_path = folder_path
-
-    def load_data(self, file_path, file_type):
-        if file_type == 'csv':
-            return pd.read_csv(file_path)
-        elif file_type == 'gdf':
-            return gpd.read_file(file_path)
-        elif file_type == 'pickle':
-            return self.load_data_from_pickle(self.folder_path, file_path)
-
-    def load_all_data(self):
-        J = self.load_data('Farm_test.pickle', 'pickle')
-        M = self.load_data('manure_production_test.pickle', 'pickle')
-        return J, M
-    
-    def load_data_from_pickle(self, folder_path, file_path):
-        with open(f"{folder_path}/{file_path}", "rb") as f:
-            data = pickle.load(f)
-        return data
-
-class MapInitializer:
-    def __init__(self, digester_df, farm_df, suitability_df, boundary):
-        self.digester_df = digester_df
-        self.farm_df = farm_df
-        self.suitability_df = suitability_df
-        self.boundary = boundary
-
-    def initialize_map(self):
-        digester_layer = pdk.Layer(type='ScatterplotLayer',
-                                    data=self.digester_df,
-                                    get_position=['x', 'y'],
-                                    get_radius=800,
-                                    get_fill_color='color',
-                                    pickable=True,
-                                    auto_highlight=True, 
-                                    get_line_color=[255, 255, 255],
-                                    get_line_width=3)
-        farm_layer = pdk.Layer(type='ScatterplotLayer',
-                               data=self.farm_df,
-                               get_position=['x', 'y'],
-                               get_radius=300,
-                                           get_fill_color='color',
-                                           get_line_color=[0, 0, 0],
-                                           pickable=False,
-                                           auto_highlight=True)
-        hex_layer = pdk.Layer(type="H3HexagonLayer",
-            data=self.suitability_df,
-            pickable=True,
-            filled=True,
-            extruded=False,
-            opacity=0.5,
-            get_hexagon="he7",
-            get_fill_color ='[0, 0, 255*Value, 255]',
-            auto_highlight=True)
-        
-        boundary_layer = pdk.Layer(
-            "GeoJsonLayer",
-            data=self.boundary,
-            stroked=True, 
-            filled=False,  
-            getLineColor = [128,128,128],
-            getLineWidth= 80)
-
-        self.digester_df['name'] = self.digester_df.index.astype(str)
-        digester_label_layer = pdk.Layer(
-            "TextLayer",
-            self.digester_df,
-            pickable=True,
-            get_position=['x', 'y'],
-            get_text="name",
-            get_size=18,
-            get_color=[255,255,255],
-            get_angle=0,
-            get_text_anchor=String("middle"),
-            get_alignment_baseline=String("center"))
-        
-        view_state=pdk.ViewState(
-            latitude=self.farm_df['y'].mean(),
-            longitude=self.farm_df['x'].mean(),
-            zoom=9,
-            )
-        TOOLTIP_TEXT = {
-            "html": "Manure: {material_quantity} ton/yr <br /> From: farm #<span style='color:white; font-weight:bold;'>{farm_number}</span> <br /> To: digester site #<span style='color:white; font-weight:bold;'>{digester_number}</span>"
-        }
-        deck = pdk.Deck(
-            layers=[hex_layer, farm_layer, digester_layer, digester_label_layer, boundary_layer],
-            initial_view_state=view_state, 
-            map_style= 
-            'mapbox://styles/mapbox/streets-v12',
-            tooltip=TOOLTIP_TEXT
-            )
-        return deck
-    
-    def update_digester_layer_color(digester_df, I, deck):
-        # Update the color of digester to grey if not selected 
-        digester_df_copy = digester_df.copy()
-        digester_df_copy.loc[~digester_df_copy.index.isin(I), 'color'] ='[169, 169, 169]'
-        deck.layers[2].data = digester_df_copy
-        return deck
-
-class ModelPreparer:
-    def __init__(self, loi, _h3_gdf, _farm_gdf):
-        self.loi = loi
-        self._h3_gdf = _h3_gdf
-        self._farm_gdf = _farm_gdf
-
-    def prepare_model_input(self):
-        # Ensure the 'hex9' column exists in the '_h3_gdf' DataFrame
-        if 'hex9' not in self._h3_gdf.columns:
-            raise ValueError("The '_h3_gdf' DataFrame does not contain a 'hex9' column.")
-
-        # Ensure the 'loi' DataFrame has the correct structure
-        if not isinstance(self.loi, pd.DataFrame) or self.loi.shape[1] != 2:
-            raise ValueError("The 'loi' object must be a DataFrame with two columns.")
-
-        # Use the DataFrame's index for the 'isin' operation
-        loi_gdf = self._h3_gdf[self._h3_gdf['hex9'].isin(self.loi.index)]
-        loi_gdf.index = range(1, len(loi_gdf) + 1) # Reset index to start with 1
-        C, plant = calculate_od_matrix(self._farm_gdf, loi_gdf, cost_per_km=0.69)
-
-        Plant_all = ['All'] + plant # add "ALL" to the list of candidate sites as input labels for customizing which sites to include in analysis
-        color_mapping = {label: [random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)] for label in loi_gdf.index}
-        loi_gdf['color'] = loi_gdf.index.map(color_mapping)
-
-        d, f = assign_capacity_capex(plant) # random M and f generator for the time being
-
-        return loi_gdf, C, plant, Plant_all, d, f
-
-# Load session data
-def session_load():
-    # Create an instance of DataLoader
-    data_loader = DataLoader(FOLDER_PATH)
-
-    # Now you can call load_data method
-    boundary = data_loader.load_data('./app_data/twente_4326.geojson', 'gdf')
-    h3_gdf = data_loader.load_data('./app_data/h3_geometry.shp', 'gdf')
-    farm_gdf = data_loader.load_data("./app_data/farm.shp", 'gdf')
-    J, M  = data_loader.load_all_data()
-    farm = data_loader.load_data("./farm/farm_mock.csv", 'csv')
-    hex_df = data_loader.load_data('./hex/hex_df2.csv', 'csv')
-    return {'boundary': boundary, 'h3_gdf': h3_gdf, 'farm_gdf': farm_gdf, 'M': M, 'J': J, 'farm': farm, 'hex_df': hex_df}
-
-# Perform initial setup
-def perform_initial_setup(page_2_space):
-    data_name = ['boundary', 'h3_gdf', 'farm_gdf', 'M', 'J', 'farm', 'hex_df']
-    missing_keys = [key for key in data_name if key not in page_2_space.keys()]
-    if missing_keys:
-        loaded_data = session_load()
-        for key, value in loaded_data.items():
-            page_2_space[key] = value
-    if 'target' not in page_2_space:
-        page_2_space['target'] = 0  # Set a default value, adjust as needed
-
-# Main content
-def main_content(page_2_space):
-    boundary = page_2_space.get('boundary', None)
-    J = page_2_space.get('J', None)  # Replace None with an appropriate default
-    farm = page_2_space.get('farm', None)
-    hex_df = page_2_space.get('hex_df', None)
-    M = page_2_space.get('M', None)
-    target = page_2_space.get('target', None)
-    h3_gdf = page_2_space.get('h3_gdf', None)
-    farm_gdf = page_2_space.get('farm_gdf', None)
-    st.write(st.session_state.loi)
-
-    model_preparer = ModelPreparer(st.session_state.loi, h3_gdf, farm_gdf)
-    loi_gdf, C, plant, Plant_all, d, f = model_preparer.prepare_model_input()
-
-    map_initializer = MapInitializer(loi_gdf, farm, hex_df, boundary)
-    deck = map_initializer.initialize_map()
-
-    with st.sidebar:
-        target = (st.slider(':dart: **Manure Utilization Target (%):**', min_value=0, max_value=100,step=10)/ 100) # Define manure use goal (mu)
-
-        with st.container():
-            st.write("**Map Layers**")
-            show_farm = st.sidebar.checkbox('Farms', value=True)
-            show_digester = st.sidebar.checkbox('Digesters', value=True)
-            show_suitability = st.sidebar.checkbox('Suitability', value=False)
-
-        st.markdown("")
-        st.markdown("")
-        st.markdown("")
-        with st.expander("Click to learn more about this dashboard"):
-            st.markdown(f"""
-            Introduce Bioze...
-            *Updated on {str(TODAY)}.*  
-            """)
-
-    deck.layers[0].visible = show_suitability
-    deck.layers[1].visible = show_farm
-    deck.layers[2].visible = show_digester
-
-    with st.expander(':white_check_mark: Customize Site Selection'):
-        with st.form('select_plant'):
-            I = st.multiselect("Select specific sites to include in the analysis. By default, all sites are included.", Plant_all)
-            if "All" in I or not I:
-                I = plant
-            submit_select_loi = st.form_submit_button("Submit")
-
-    if submit_select_loi and page_2_space['target'] == 0:
-        deck = MapInitializer.update_digester_layer_color(loi_gdf, I, deck)
-
-    if submit_select_loi or page_2_space['target'] != target:
-        with st.spinner('Running the model...'):
-            page_2_space['target'] = target # Update the session state with the new target value
-            d = MapInitializer.filter_Plant(d, I)
-            f = MapInitializer.filter_Plant(f, I)
-            C = {(i, j): value for (i, j), value in C.items() if i in I}
-
-            m, processed_manure = flp_scip(I, J, d, M, f, C, target)
-            m.optimize()
-            total_cost, assignment_decision, used_capacity_df = flp_get_result(m, I, J, d, C)
-            total_biogas = processed_manure * 20 # 1 tonne manure yields around 20m³ biogas
-            methane_saving = total_biogas*0.6 # methane content of biogas is assumed 60%
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric(label="Total Cost over Lifetime (12 yr)", value="€{:,.2f}M".format(sum(total_cost['Value']) / 1000000))
-            col1.metric(label="Total Manure Processed", value="{:,.0f} t/yr".format(processed_manure))
-            col1.metric(label="Total Biogas Yield Potential", value="{:,.0f}M m³/yr".format(total_biogas/ 1000000))
-            with col3:
-                st.markdown("Digester Capacity Utilization Rate")
-                st.bar_chart(used_capacity_df)
-
-            deck = MapInitializer.update_digester_layer_color(loi_gdf, I, deck)
-            deck = MapInitializer.update_farm_layer_color(farm, loi_gdf, assignment_decision, deck)
-            deck = MapInitializer.update_map(farm, loi_gdf, assignment_decision, deck)
-
-    st.pydeck_chart(deck, use_container_width=True)
-
-# Main function
-def main():
-    st.markdown("### Fase 2: Beleidsverkenner")
-    st.markdown(
-        "Op onderstaande kaart ziet u waar uw kandidaat-locaties uit **Fase 1** en de boerderijen in de omgeving zich bevinden."
-        " Door mest van lokale boerderijen te gebruiken, kunnen we biogas produceren ter vervanging van aardgas, waardoor duurzame energie wordt bevorderd en de uitstoot van broeikasgassen door mest wordt voorkomen. "
-        " Onderzoek de beste locaties om grote vergisters te bouwen op basis van verschillende beleidsdoelen met betrekking tot de hoeveelheid mest bestemd voor de productie van biogas."
-    )
-    st.markdown("")
-    st.markdown(":dart:"
-        " Bepaal hoeveel van de mest in de regio u wilt gebruiken voor de productie van biogas en geef die hoeveelheid aan met de schuifregelaar **'Mestgebruiksdoelstelling (%)'**. "
-        " De tool vindt de meest strategische locaties om grote vergisters te bouwen om uw doel te bereiken."
-    )
-    st.markdown("")
-    st.markdown(":white_check_mark:"
-        " U kunt bepalen welke kandidaat-sites in de analyse worden opgenomen door ze te selecteren in **'Siteselectie aanpassen'**. Standaard worden alle sites meegenomen in de analyse."
-    )
-    st.markdown("")
-    with st.expander("**Hoe de kaart te lezen :mag_right:**"):
-        st.markdown("Boerderijen - :black_circle:")
-        st.markdown("Kandidaat-vergistersites - :rainbow[Gekleurde] and numbered markers")
-        st.markdown("Toewijzing van boerderijen aan vergistingslocaties - **:green[groen]** en **:red[rood]** bogen")
-        st.markdown("Opmerking: De kleur van boerderijen verandert in de kleur van de vergistingslocaties waaraan ze in de oplossing zijn toegewezen. Als de boerderijen worden uitgesloten van de oplossing, blijven ze zwart.")
-    st.markdown("")
-    st.divider()
-    st.markdown("")
-
-    if 'page_2' not in st.session_state:
-        st.session_state.page_2 = {}
-    
-    page_2_space = st.session_state.page_2
-
-    if "loi" not in st.session_state or len(st.session_state.loi) == 0:
-        st.warning("Oeps! Het lijkt erop dat je nog geen resultaten hebt opgeslagen. Ga eerst naar **Fase 1**.", icon="⚠️")
-        if st.button("Visit **Phase 1**"):
-            st.switch_page("pages/1_Fase_1_Geschiktheidsanalyse.py")
+setup("Beleidsverkenner")
+header(
+    "Fase 02 / Locatiescenario",
+    "Van kansrijk gebied naar een scenario.",
+    "Verken welke vergisterlocaties een gekozen hoeveelheid mest kunnen verwerken. Het model weegt investering, exploitatie en transport over het wegennet af.",
+)
+sites = st.session_state.get("candidates")
+if sites is None or sites.empty:
+    st.info("Bereken eerst clusters en kandidaatlocaties in de geschiktheidsanalyse.")
+    st.page_link("pages/1_Fase_1_Geschiktheidsanalyse.py", label="Naar de geschiktheidsanalyse")
+    footer()
+    st.stop()
+farms = load_farms()
+with st.sidebar:
+    st.subheader("Scenario instellen")
+    with st.expander("Kandidaatlocaties aanpassen"):
+        chosen = st.multiselect("Kandidaatlocaties", sites.site_id.tolist(), default=sites.site_id.tolist())
+    st.caption(f"{len(chosen)} kandidaten in dit scenario")
+    target = st.slider("Te verwerken aandeel (%)", 0, 100, 50, step=5)
+    mode = st.radio("Herkomst mestvolumes", ["Scenarioaanname", "Eigen CSV"])
+    supply = None
+    if mode == "Scenarioaanname":
+        amount = st.number_input("Ton per landbouwlocatie per jaar", min_value=1, value=2500, step=100)
+        st.caption("Hypothetische, gelijke volumes. Dit zijn geen gemeten bedrijfsgegevens.")
+        acknowledged = st.checkbox("Gebruik deze scenarioaanname")
+        if acknowledged:
+            supply = {i: float(amount) for i in farms.farm_id}
     else:
-        with st.spinner("Running..."):
-            perform_initial_setup(page_2_space) # Replace with your function to generate trial selection
-            main_content(page_2_space)
-
-if __name__ == "__main__":
-    main()
+        uploaded = st.file_uploader("Mestvolumes per locatie", type=["csv"])
+        if uploaded is not None:
+            try:
+                supply = read_supply_csv(uploaded, farms.farm_id)
+            except (ValueError, pd.errors.ParserError) as exc:
+                st.error(str(exc))
+        st.download_button(
+            "Download invoersjabloon",
+            pd.DataFrame({"farm_id": farms.farm_id, "tonnes_per_year": [None] * len(farms)}).to_csv(index=False),
+            "bioze_mestvolumes.csv",
+            "text/csv",
+        )
+    with st.expander("Capaciteit en kosten"):
+        capacity = st.number_input("Capaciteit per vergister (ton/jaar)", min_value=1, value=119547, step=1000)
+        capex = st.number_input("Investering per vergister (€)", min_value=0, value=6089160, step=100000)
+        opex = st.number_input("Exploitatie per vergister (€/jaar)", min_value=0, value=1047200, step=10000)
+        rate = st.number_input("Transport (€/ton/km)", min_value=0.0, value=0.69, step=0.05)
+        years = st.number_input("Looptijd (jaar)", min_value=1, max_value=50, value=12)
+        st.caption(
+            "Startwaarden uit het oude prototype, toegepast als wijzigbare aannames. De transporteenheid is nu expliciet €/ton/km; valideer deze in een praktijkscenario."
+        )
+    basemap = st.toggle("Online achtergrondkaart", value=False)
+    run = st.button("Bereken scenario", type="primary", disabled=supply is None or not chosen, width="stretch")
+selected_sites = sites.loc[sites.site_id.isin(chosen)].copy()
+scenario = Scenario(
+    target=target / 100, capacity=capacity, capex=capex, annual_opex=opex, transport_eur_tonne_km=rate, years=years
+)
+signature = json.dumps(
+    {
+        "sites": selected_sites[["site_id", "hex9"]].values.tolist(),
+        "supply": supply,
+        "scenario": asdict(scenario),
+        "source": mode,
+    },
+    sort_keys=True,
+)
+if st.session_state.get("policy_signature") != signature:
+    st.session_state.pop("policy_result", None)
+if run:
+    try:
+        with st.spinner("Wegafstanden berekenen en scenario optimaliseren…"):
+            distances = calculate_distances(farms, selected_sites)
+            result = solve_scenario(chosen, supply, distances, scenario)
+            st.session_state.policy_result = result
+            st.session_state.policy_signature = signature
+            st.session_state.policy_distances = distances
+    except (ValueError, RuntimeError, OSError) as exc:
+        st.error(str(exc))
+result = st.session_state.get("policy_result")
+if result:
+    metrics = st.columns(4)
+    metrics[0].metric("Geopende vergisters", len(result["active_sites"]))
+    metrics[1].metric("Verwerkt per jaar", f"{result['processed']:,.0f}".replace(",", ".") + " ton")
+    metrics[2].metric(
+        f"Totale kosten · {years} jaar", "€ " + f"{result['total_cost'] / 1e6:.2f}".replace(".", ",") + " mln"
+    )
+    metrics[3].metric("Gem. gewogen wegafstand", f"{result['mean_km']:.1f}".replace(".", ",") + " km")
+    if result["status"] == "optimal":
+        st.caption("Optimale oplossing binnen de gekozen shortlist en scenarioaannames.")
+    else:
+        st.warning(f"Haalbare tussenoplossing: {result['status']}; optimaliteitsafstand {result['gap']:.1%}.")
+else:
+    metrics = st.columns(3)
+    metrics[0].metric("Kandidaatlocaties", len(selected_sites))
+    metrics[1].metric("Landbouwlocaties", len(farms))
+    metrics[2].metric("Verwerkingsdoel", f"{target}%")
+    st.caption("Kies de invoer in het zijpaneel en bereken een scenario om de toewijzingen te bekijken.")
+map_tab, results_tab, assumptions_tab = st.tabs(["Locaties en stromen", "Resultaten", "Aannames en invoer"])
+with map_tab:
+    show_map(sites=selected_sites, farms=farms, result=result, basemap=basemap, height=540)
+    st.caption(
+        "Kleine stippen: landbouwlocaties · V01, V02…: kandidaten · gekleurde vergisters: geopend · bogen: toewijzingen, geen getekende rijroutes. Afstanden worden over het gerichte wegennet berekend."
+    )
+    note(
+        "Scenarioberekening, geen beleidsadvies. Mestvolumes en kosten zijn aannames tenzij je zelf een onderbouwde invoer hebt aangeleverd."
+    )
+with results_tab:
+    if not result:
+        st.info("Bereken een scenario om capaciteit, kosten en transportstromen te bekijken.")
+    else:
+        left, right = st.columns(2)
+        with left:
+            st.subheader("Kosten over de looptijd")
+            costs = pd.DataFrame({"Categorie": result["costs"].keys(), "Euro": result["costs"].values()})
+            fig = px.bar(
+                costs,
+                x="Categorie",
+                y="Euro",
+                color="Categorie",
+                color_discrete_sequence=["#207c7f", "#86afa4", "#d69a62"],
+            )
+            fig.update_layout(
+                showlegend=False, height=310, margin=dict(l=0, r=0, t=15, b=0), yaxis_title="Euro · niet verdisconteerd"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with right:
+            st.subheader("Capaciteitsbenutting")
+            fig = px.bar(
+                result["utilization"],
+                x="site_id",
+                y="utilization_pct",
+                range_y=[0, 100],
+                color_discrete_sequence=["#207c7f"],
+            )
+            fig.update_layout(
+                height=310, margin=dict(l=0, r=0, t=15, b=0), xaxis_title="Vergister", yaxis_title="Benutting (%)"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Jaarlijkse transportstromen")
+        st.dataframe(
+            result["allocations"].rename(
+                columns={
+                    "site_id": "Vergister",
+                    "farm_id": "Landbouwlocatie",
+                    "tonnes_per_year": "Ton/jaar",
+                    "road_km": "Wegafstand (km)",
+                }
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        st.download_button(
+            "Download transportstromen",
+            result["allocations"].to_csv(index=False),
+            "bioze_transportstromen.csv",
+            "text/csv",
+        )
+        report = {
+            "parameters": asdict(scenario),
+            "supply_source": mode,
+            "supply": supply,
+            "sites": selected_sites[["site_id", "hex9"]].to_dict("records"),
+            "status": result["status"],
+            "gap": result["gap"],
+            "costs": result["costs"],
+            "processed_tonnes_per_year": result["processed"],
+            "mean_road_km": result["mean_km"],
+        }
+        st.download_button(
+            "Download scenariorapport", json.dumps(report, indent=2), "bioze_scenario.json", "application/json"
+        )
+        st.download_button(
+            "Download wegafstanden",
+            distance_table(st.session_state.policy_distances).to_csv(index=False),
+            "bioze_wegafstanden.csv",
+            "text/csv",
+        )
+with assumptions_tab:
+    st.write(
+        "Het capacitated facility location model verdeelt tonnen per jaar over geopende vergisters. De doelstelling wordt exact gehaald; splitsing van één bron over meerdere vergisters is toegestaan. Onbereikbare verbindingen worden niet opgenomen."
+    )
+    st.write(
+        "Totale kosten = investering + jaarlijkse exploitatie × looptijd + som(ton/jaar × weg-km × €/ton/km × looptijd). Geen verdiscontering, retourritten, aansluittrajecten vanaf het bedrijf of opbrengsten. De kosten in de grafiek zijn gelijk aan de solverdoelfunctie."
+    )
+    st.write(
+        "Locaties worden maximaal 5 km van een netwerkknoop gekoppeld, gemeten in RD New. Alleen gerichte, bereikbare wegverbindingen tellen mee. Het extract is grof; landbouwlocaties buiten de provincie en ontbrekende of te verre aansluitingen worden uitgesloten."
+    )
+    st.dataframe(farms[["farm_id", "Bedrijfsty", "lon", "lat"]], hide_index=True, width="stretch")
+footer()

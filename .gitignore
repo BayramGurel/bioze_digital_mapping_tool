@@ -7,3 +7,10 @@ standalone/CBS_100-100_house/clipped.geojson
 standalone/corine_data_landcover/outputs
 standalone/corine_data_landcover/outputs
 H3DataProcessing/cache
+
+# Local development
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc

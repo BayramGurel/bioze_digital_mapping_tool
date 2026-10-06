@@ -1,29 +1,53 @@
 import streamlit as st
 
-def main():
-    st.set_page_config(page_title="Begin", layout="wide", initial_sidebar_state="expanded")
+from bioze.data import CRITERIA, derive_distances, load_farms
+from bioze.suitability import score_distances
+from bioze.ui import footer, header, legend, setup, show_map
 
-    st.title(":seedling: Provincie Zuid-Holland Interactieve Tool (Met Neppe Data)")
-    
-    st.markdown(":bulb: Over de tool...")
-    st.markdown("Voor de duidelijkheid: deze tool bestaat puur uit mock data. De tool bestaat uit een ***tweestaps*** leerproces om gebruikers te betrekken bij het leren over de voordelen en afwegingen die gepaard gaan met de plaatsing van grootschalige biogasvergisters.")
-
-    st.markdown(":compass: Hoe de tool te gebruiken...")
-    st.markdown("**Fase 1: Geschiktheidsanalyse**")
-    st.markdown("Fase 1 verwelkomt gebruikers om een ​​geschiktheidsanalyse op meerdere criteria uit te voeren. Geschiktheidsanalyse kan worden beschouwd als een methode voor locatieselectie.")
-    st.markdown("We zullen deze methode gebruiken om te bepalen of een bepaald gebied in de regio geschikt is voor het bouwen van een grootschalige vergister.")
-    st.markdown("Aan het einde van deze fase beschikt u over een lijst met kandidaatlocaties voor grootschalige vergisters.")
-    st.markdown("**Fase 2: Beleidsverkenner**")
-    st.markdown("Fase 2 nodigt gebruikers uit om combinaties van kandidaat-locaties voor grootschalige vergisters te verkennen om de in de regio geproduceerde mest efficiënt te verwerken voor de productie van biogas.")
-    st.markdown("We zullen uw lijst met kandidaatlocaties uit Fase 1 gebruiken om scenario's te genereren die bestaan ​​uit de meest strategische locaties voor vergisters om bepaalde doelen te bereiken.")
-    st.markdown("Aan het einde van deze fase leer je de kosten en baten van verschillende scenario’s.")
-    st.markdown(":repeat: **Iterative Learning**") 
-    col1, col2, col3 = st.columns(3)
-    with col2: 
-        st.image("./two_phase.png")
-
-    st.markdown("Deze tool is ontwikkeld voor Data Gedreven werken binnen het Provincie Zuid Holland Programma Landelijk Gebied. Het bouwt verder op het al bestaande BIOZE project. BIOZE is ontwikkeld voor het EU Interreg Project: BIOmass skills for Net Zero (BIOZE), door de Faculteit Geo-Informatie Wetenschap en Aardobservatie (ITC) van de Universiteit Twente.")
-
-# Run the Streamlit app
-if __name__ == "__main__":
-    main()
+setup("Overzicht")
+header(
+    "Decision support / Zuid-Holland",
+    "Ruimte voor een betere afweging.",
+    "Verken geschikte gebieden voor biogasvergisters. Combineer ruimtelijke criteria en vergelijk locaties, capaciteit en transport in één samenhangende workflow.",
+)
+with st.spinner("Ruimtelijke bronlagen voorbereiden…"):
+    distances = derive_distances()
+    farms = load_farms()
+    preview = score_distances(distances, {key: 1 for key in CRITERIA})
+metrics = st.columns(3)
+metrics[0].metric("Gebied", "Zuid-Holland")
+metrics[1].metric("Ruimtelijke criteria", len(CRITERIA))
+metrics[2].metric("Analysecellen · H3 resolutie 9", f"{len(distances):,}".replace(",", "."))
+left, right = st.columns([1.85, 1], gap="large")
+with left:
+    st.subheader("Het landschap als vertrekpunt")
+    show_map(scores=preview, height=450)
+    legend()
+    st.caption("Kaart: gemiddelde scores op H3-resolutie 8. Analyse en export blijven op resolutie 9.")
+    st.caption("Voorbeeld: gelijke weging van zes nabijheidscriteria. Een relatieve score is geen vergunningstoets.")
+with right:
+    st.subheader("Van analyse naar scenario")
+    st.markdown(
+        '<div class="bioze-card"><div class="bioze-step">01 / GESCHIKTHEID</div><h3>Weeg wat ertoe doet</h3><p>Kies criteria, pas gewichten aan en herken clusters van relatief geschikte gebieden.</p></div>',
+        unsafe_allow_html=True,
+    )
+    st.page_link("pages/1_Fase_1_Geschiktheidsanalyse.py", label="Open geschiktheidsanalyse", width="stretch")
+    st.markdown(
+        '<div class="bioze-card"><div class="bioze-step">02 / BELEIDSVERKENNING</div><h3>Vergelijk de mogelijkheden</h3><p>Verken kandidaatlocaties met een capaciteitsmodel en afstanden over het aanwezige wegennet.</p></div>',
+        unsafe_allow_html=True,
+    )
+    st.page_link("pages/2_Fase_2_Beleidsverkenner.py", label="Open beleidsverkenner", width="stretch")
+    st.caption(
+        f"{len(farms)} landbouwlocaties binnen de provinciegrens. Mestvolumes zijn scenarioaannames of eigen invoer; er zijn geen gemeten volumes meegeleverd."
+    )
+with st.expander("Bronnen en reikwijdte"):
+    st.write(
+        "Deze versie gebruikt de meegeleverde provinciegrens, het H3-grid, landbouwlocaties, het OSM-wegennet en CORINE Land Cover 2018. De scores zijn afgeleid van afstanden in meters, zonder nieuwe onderzoeksdata te verzinnen."
+    )
+    st.write(
+        "Bos en semi-natuur is een landgebruiksindicator. Beschermde natuur, veiligheidsafstanden, netcapaciteit en vergunningen zijn aanvullende toetsen. Gasinlaten zijn niet opgenomen omdat de aanwezige gasinlaatlaag bij Twente hoort."
+    )
+    st.write(
+        "BIOZE is oorspronkelijk ontwikkeld door Wen-Yu Chen, Johannes Flacke en Pirouz Nourian, Universiteit Twente / ITC, voor Interreg North Sea BIOZE. De Zuid-Hollandaanpassing is van Bayram Gurel."
+    )
+footer()
